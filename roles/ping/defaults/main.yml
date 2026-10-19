@@ -1,0 +1,9 @@
+# どっちでチェックするか
+# - ansible: ansible.builtin.ping（SSH疎通）
+# - icmp: ICMP ping（ネットワークping）
+ping_mode: ansible
+
+# ICMP pingの回数とタイムアウト（秒）
+ping_count: 1
+ping_timeout: 1
+

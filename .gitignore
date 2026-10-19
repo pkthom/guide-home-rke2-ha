@@ -1,0 +1,4 @@
+kubectl
+kubeconfig
+kubeconfig.yaml
+*.retry

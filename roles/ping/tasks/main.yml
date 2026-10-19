@@ -1,0 +1,19 @@
+- name: Check connectivity by Ansible ping (SSH + Python)
+  ansible.builtin.ping:
+  when: ping_mode == "ansible"
+
+# ICMP ping は「Ansibleコントローラから対象ホストへ」打つのが分かりやすい
+# ※コントローラに ping コマンドが入っている前提（だいたい入ってる）
+- name: ICMP ping from controller to target
+  ansible.builtin.command: >
+    ping -c {{ ping_count }} -W {{ ping_timeout }} {{ ansible_host | default(inventory_hostname) }}
+  register: icmp_ping
+  changed_when: false
+  when: ping_mode == "icmp"
+  delegate_to: localhost
+
+- name: Show ICMP ping result
+  ansible.builtin.debug:
+    msg: "{{ icmp_ping.stdout_lines }}"
+  when: ping_mode == "icmp"
+

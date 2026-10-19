@@ -1,0 +1,119 @@
+---
+# 1. OS下準備
+- name: Prepare OS for RKE2
+  hosts: all
+  become: true
+  tasks:
+    - name: Disable SWAP
+      ansible.builtin.command: swapoff -a
+      when: ansible_swaptotal_mb > 0
+
+    - name: Disable SWAP in fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^(\s*)([^#\n]+\s+swap\s+\S+.*)$'
+        replace: '# \1\2'
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name: [curl, tar]
+        state: present
+        update_cache: true
+
+# 2. cp1 初期化
+- name: Initialize First Control Plane
+  hosts: cp[0]
+  become: true
+  tasks:
+    - name: Create config directory
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: '0755'
+
+    - name: Configure cp1
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        content: |
+          token: "{{ rke2_token }}"
+          tls-san:
+          {% for san in tls_sans %}
+            - "{{ san }}"
+          {% endfor %}
+          node-taint:
+            - "node-role.kubernetes.io/control-plane:NoSchedule"
+
+    - name: Install & Start RKE2 Server
+      ansible.builtin.shell: curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION="{{ rke2_version }}" sh -
+      args:
+        creates: /usr/local/bin/rke2
+
+    - name: Enable rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        state: started
+        enabled: true
+
+# 3. cp2, cp3 参加
+- name: Join Remaining Control Planes
+  hosts: cp[1:]
+  become: true
+  tasks:
+    - name: Create config directory
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: '0755'
+
+    - name: Configure cp join
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        content: |
+          server: "https://{{ hostvars[groups['cp'][0]]['ansible_host'] }}:9345"
+          token: "{{ rke2_token }}"
+          tls-san:
+          {% for san in tls_sans %}
+            - "{{ san }}"
+          {% endfor %}
+          node-taint:
+            - "node-role.kubernetes.io/control-plane:NoSchedule"
+
+    - name: Install & Start RKE2 Server
+      ansible.builtin.shell: curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION="{{ rke2_version }}" sh -
+      args:
+        creates: /usr/local/bin/rke2
+
+    - name: Enable rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        state: started
+        enabled: true
+
+# 4. worker 参加
+- name: Join Workers
+  hosts: worker
+  become: true
+  tasks:
+    - name: Create config directory
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: '0755'
+
+    - name: Configure agent join
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        content: |
+          server: "https://{{ hostvars[groups['cp'][0]]['ansible_host'] }}:9345"
+          token: "{{ rke2_token }}"
+
+    - name: Install & Start RKE2 Agent
+      ansible.builtin.shell: curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" INSTALL_RKE2_VERSION="{{ rke2_version }}" sh -
+      args:
+        creates: /usr/local/bin/rke2
+
+    - name: Enable rke2-agent
+      ansible.builtin.systemd:
+        name: rke2-agent
+        state: started
+        enabled: true
