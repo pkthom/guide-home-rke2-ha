@@ -63,12 +63,6 @@ ssh-keygen -t ed25519
 
 公開鍵を各ノードの `~/.ssh/authorized_keys` に置いてください。
 
-接続確認（任意）:
-
-```
-ansible-playbook playbooks/ping.yml
-```
-
 ### 4. Edit inventory.ini and group_vars/all.yml
 
 `inventory.ini` に対象ノードを書きます。
@@ -96,6 +90,12 @@ worker
 - `metallb_ip_range` / `metallb_vip` … 自宅 LAN で空いている VIP
 - `rancher_hostname` … Rancher に割り当てるホスト名
 - `rancher_bootstrap_password` … Rancher の初期パスワード（ダミーのまま使わない）
+
+接続確認（任意）:
+
+```
+ansible-playbook playbooks/ping.yml
+```
 
 ## Deploy
 
