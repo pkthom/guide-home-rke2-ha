@@ -1,0 +1,46 @@
+---
+- name: Apply MetalLB manifest
+  ansible.builtin.command: kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
+  changed_when: true
+- name: Wait for MetalLB to be ready
+  ansible.builtin.command: kubectl wait --namespace metallb-system --for=condition=ready pod --selector=app=metallb --timeout=300s
+  changed_when: false
+- name: Configure IP Pool and RKE2 Ingress
+  ansible.builtin.copy:
+    dest: /tmp/metallb-config.yaml
+    content: "{{ metallb_resources | to_nice_yaml }}"
+  vars:
+    metallb_resources:
+      apiVersion: v1
+      kind: List
+      items:
+        - apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: home-pool
+            namespace: metallb-system
+          spec:
+            addresses:
+              - "{{ metallb_ip_range }}"
+        - apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: home-l2-adv
+            namespace: metallb-system
+          spec:
+            ipAddressPools:
+              - home-pool
+        - apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: rke2-ingress-nginx
+            namespace: kube-system
+          spec:
+            valuesContent: |
+              controller:
+                service:
+                  enabled: true
+                  type: LoadBalancer
+- name: Apply configurations
+  ansible.builtin.command: kubectl apply -f /tmp/metallb-config.yaml
+  changed_when: true

@@ -1,0 +1,25 @@
+---
+- name: Disable SWAP
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Disable SWAP in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\s*)([^#\n]+\s+swap\s+\S+.*)$'
+    replace: '# \1\2'
+
+- name: Ensure NTP is enabled
+  ansible.builtin.command: timedatectl set-ntp true
+  changed_when: false
+  failed_when: false
+
+- name: Install prerequisite packages
+  ansible.builtin.apt:
+    name: [curl, tar]
+    state: present
+    update_cache: true
+  register: prereq_install
+  retries: 5
+  delay: 15
+  until: prereq_install is succeeded

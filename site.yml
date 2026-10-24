@@ -1,0 +1,8 @@
+---
+# クラスター構築からRancherデプロイまでのフルセットアップ
+- import_playbook: playbooks/rke2.yml
+- import_playbook: playbooks/metallb.yml
+- import_playbook: playbooks/rancher.yml
+
+# 必要に応じてテストも一緒に流す場合
+- import_playbook: playbooks/test-nginx.yml
