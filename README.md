@@ -1,192 +1,82 @@
 # guide-home-rke2-ha
 
-自宅ラボ向けに、Ansible で **RKE2 の HA クラスター** を組み立てるガイドです。クローンして `inventory.ini` と `group_vars/all.yml` のダミー値を自分の環境に書き換えてから playbook を実行してください。
+自宅ラボ環境向けに、Ansibleで **RKE2 HA クラスター** を全自動構築するプレイブックです。
+OS設定、RKE2構築、MetalLB、Rancherの導入を `site.yml` ひとつで一括実行します。
 
-リポジトリ内の IP・トークン・パスワードはすべてサンプルです。そのままではクラスターは作れません。
-
-## Project Structure
-
-```
-guide-home-rke2-ha/
-├── ansible.cfg
-├── inventory.ini
-├── group_vars/
-│   └── all.yml
-├── playbooks/
-│   ├── rke2.yml
-│   ├── metallb.yml
-│   ├── test-nginx.yml
-│   └── rancher.yml
-└── roles/
-    └── ping/
-```
+> [!WARNING]
+> リポジトリ内の設定値（IP・トークン・パスワード）はダミーです。必ず自身の環境に書き換えてください。
 
 ## Requirements
 
-- Ansible を実行する Linux マシン（コントローラ）
-- SSH で到達できる Ubuntu ノード（例: Control Plane 3 台、Worker 3 台）
-- ノード同士が同一 L2 セグメント（MetalLB の L2 Advertisement 用）
-- コントローラから Kubernetes API に到達できること
+- **Ansible コントローラ**: Ansible と kubectl が動作する Linux マシン
+- **ターゲットノード**: SSH接続可能な Ubuntu マシン（例: Control Plane x3, Worker x3）
+- ノード同士が同一 L2 ネットワークに属していること（MetalLB用）
 
-ダミー構成の対応表です。必ず自分の LAN に合わせて書き換えてください。
+## Quick Start
 
-| 役割 | ホスト | ダミー IP |
-| --- | --- | --- |
-| Control Plane | cp1 / cp2 / cp3 | 192.168.1.11–13 |
-| Worker | worker1 / worker2 / worker3 | 192.168.1.21–23 |
-| MetalLB VIP 範囲 | — | 192.168.1.100–110 |
-| Ingress VIP（例） | chart-example.local / rancher.example.local | 192.168.1.100 |
+### 1. 準備
+リポジトリをクローンし、コントローラから各ノードへ公開鍵（パスワードなしSSH）を設定します。
 
-## Setup
-
-### 1. Clone
-
-```
-git clone https://github.com/pkthom/guide-home-rke2-ha.git
+```bash
+git clone [https://github.com/pkthom/guide-home-rke2-ha.git](https://github.com/pkthom/guide-home-rke2-ha.git)
 cd guide-home-rke2-ha
 ```
 
-### 2. Install Ansible (Ubuntu/Debian)
+### 2. 設定ファイルの編集
+環境に合わせて以下の2ファイルを修正します。
 
+- **`inventory.ini`**: 対象ノードのIPアドレス
+- **`group_vars/all.yml`**:
+  - `rke2_token`: クラスター参加用トークン
+  - `tls_sans`: 先頭Control PlaneのIP と Rancherのホスト名
+  - `metallb_ip_range` / `metallb_vip`: 割り当てるVIP範囲
+  - `rancher_hostname` / `rancher_bootstrap_password`: Rancherの設定
+
+*(任意) 接続確認: `ansible-playbook playbooks/ping.yml`*
+
+### 3. デプロイ
+マスタープレイブックを実行します。
+
+```bash
+ansible-playbook site.yml
 ```
-sudo apt update
-sudo apt install -y ansible
-```
+※自動的にコントローラの `~/.kube/config` までセットアップされます。
 
-### 3. Set up SSH keys
+### 4. 確認とアクセス
+デプロイ完了後、すぐに `kubectl` が利用可能です。
 
-コントローラで鍵を作成します。
-
-```
-ssh-keygen -t ed25519
-```
-
-公開鍵を各ノードの `~/.ssh/authorized_keys` に置いてください。
-
-### 4. Edit inventory.ini and group_vars/all.yml
-
-`inventory.ini` に対象ノードを書きます。
-
-```
-[cp]
-cp1 ansible_host=192.168.1.11 ansible_user=ubuntu
-cp2 ansible_host=192.168.1.12 ansible_user=ubuntu
-cp3 ansible_host=192.168.1.13 ansible_user=ubuntu
-
-[worker]
-worker1 ansible_host=192.168.1.21 ansible_user=ubuntu
-worker2 ansible_host=192.168.1.22 ansible_user=ubuntu
-worker3 ansible_host=192.168.1.23 ansible_user=ubuntu
-
-[rke2_cluster:children]
-cp
-worker
-```
-
-あわせて `group_vars/all.yml` も書き換えてください。
-
-- `rke2_token` … クラスター参加用トークン（ダミーのまま使わない）
-- `tls_sans` … API 証明書の SAN（先頭 Control Plane の IP と Rancher のホスト名）
-- `metallb_ip_range` / `metallb_vip` … 自宅 LAN で空いている VIP
-- `rancher_hostname` … Rancher に割り当てるホスト名
-- `rancher_bootstrap_password` … Rancher の初期パスワード（ダミーのまま使わない）
-
-接続確認（任意）:
-
-```
-ansible-playbook playbooks/ping.yml
-```
-
-## Deploy
-
-### 5. RKE2 クラスターを作る
-
-```
-ansible-playbook playbooks/rke2.yml
-```
-
-最初の Control Plane（`cp[0]`）で server を初期化し、残りの Control Plane と Worker がそこに join します。
-
-### 6. kubectl を入れる
-
-コントローラに kubectl を入れてください。手順は公式ドキュメントに従います。
-
-[Install and Set Up kubectl on Linux](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/)
-
-例（Linux amd64）:
-
-```
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-```
-
-kubeconfig は先頭の Control Plane から取得します。`192.168.1.11` は自分の `cp1` の IP に置き換えてください。
-
-```
-mkdir -p ~/.kube
-ssh ubuntu@192.168.1.11 "sudo cat /etc/rancher/rke2/rke2.yaml" > ~/.kube/config
-sed -i 's/127.0.0.1/192.168.1.11/' ~/.kube/config
-chmod 600 ~/.kube/config
-```
-
-### 7. ノードを確認する
-
-```
+```bash
 kubectl get nodes
 ```
 
-ノードが `Ready` になればクラスターは起動しています。Control Plane には `NoSchedule` の taint が付く想定です。
-
-### 8. MetalLB と Ingress を入れる
-
-```
-ansible-playbook playbooks/metallb.yml
-```
-
-MetalLB が VIP を払い出し、RKE2 同梱の Ingress NGINX を `LoadBalancer` にします。
-
-割り当てられた外部 IP は次で確認できます。
-
-```
-kubectl -n kube-system get svc rke2-ingress-nginx-controller
-```
-
-`group_vars/all.yml` の `metallb_vip` は、ここで実際に付いた IP と揃えてください。
-
-### 9. テスト用 Nginx を入れる
-
-```
-ansible-playbook playbooks/test-nginx.yml
-```
-
-`chart-example.local` 向けの Ingress が `test` ネームスペースに作られます。
-
-### 10. Rancher を入れる
-
-```
-ansible-playbook playbooks/rancher.yml
-```
-
-cert-manager と Rancher を入れ、CoreDNS に `rancher_hostname` を足します。初期パスワードは `group_vars/all.yml` の `rancher_bootstrap_password` です。初回ログイン後に必ず変更してください。
-
-### 11. /etc/hosts を編集する
-
-ブラウザを使うマシン（コントローラや自分の PC）の `/etc/hosts` に、MetalLB の VIP を書きます。IP とホスト名は自分の値に置き換えてください。
-
-```
+ブラウザからアクセスするため、お使いのPCの `/etc/hosts` に VIP を追記します。
+```text
 192.168.1.100 chart-example.local
 192.168.1.100 rancher.example.local
 ```
+- Rancher UI: `https://rancher.example.local/`
+- Test Nginx: `http://chart-example.local/` (※ `playbooks/test-nginx.yml` 実行時)
 
-## Access
+## Project Structure
 
-- http://chart-example.local/
-- https://rancher.example.local/
-
-## References
-
-- [RKE2](https://docs.rke2.io/)
-- [MetalLB](https://metallb.universe.tf/)
-- [Rancher](https://ranchermanager.docs.rancher.com/)
-- [kubectl (Linux)](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/)
-- [Ansible](https://docs.ansible.com/)
+```text
+.
+├── README.md
+├── ansible.cfg
+├── inventory.ini        # ターゲットノードの定義
+├── site.yml             # 全自動構築用マスタープレイブック ★
+├── group_vars/
+│   └── all.yml          # クラスター全体で使う変数群
+├── playbooks/
+│   ├── ping.yml         # 疎通確認用
+│   ├── rke2.yml         # RKE2構築
+│   ├── metallb.yml      # MetalLBデプロイ
+│   ├── rancher.yml      # Rancherデプロイ
+│   └── test-nginx.yml   # テスト用アプリ
+└── roles/               # タスク定義
+    ├── ping/
+    ├── rke2/
+    ├── metallb/
+    ├── rancher/
+    └── test_nginx/
+```
